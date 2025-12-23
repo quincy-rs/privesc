@@ -1,0 +1,26 @@
+[package]
+name = "privesc"
+version = "1.0.0"
+edition = "2024"
+authors = ["Jakub Kubík <jakub.kubik.it@protonmail.com>"]
+description = "Small utility library for multi-platform privelege escalation"
+license = "MIT"
+repository = "https://github.com/quincy-rs/privesc"
+readme = "README.md"
+keywords = ["privilege", "escalation", "sudo", "uac", "admin"]
+categories = ["os", "authentication"]
+
+[dependencies]
+thiserror = "^2.0.17"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+which = "^8.0.0"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "^0.62.0", features = [
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+    "Win32_System_Registry"
+] }
