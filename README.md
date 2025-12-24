@@ -36,6 +36,36 @@ let output = PrivilegedCommand::new("/usr/bin/cat")
     .run()?;
 ```
 
+### Spawning without blocking
+
+Use `spawn()` to start a privileged process and continue working while it runs:
+
+```rust
+use privesc::PrivilegedCommand;
+
+fn main() -> privesc::Result<()> {
+    let mut child = PrivilegedCommand::new("/usr/bin/long-task")
+        .spawn()?;
+
+    if let Some(id) = child.id() {
+        println!("Process started with ID: {id}");
+    }
+
+    // Do other work while the process runs...
+
+    // Check if done without blocking
+    if let Some(status) = child.try_wait()? {
+        println!("Already finished: {status}");
+    }
+
+    // Block until completion
+    let output = child.wait()?;
+    println!("Exit status: {}", output.status);
+
+    Ok(())
+}
+```
+
 ## Platform Behavior
 
 | Platform | GUI mode | CLI mode | Output capture |

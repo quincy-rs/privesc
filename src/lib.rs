@@ -11,6 +11,59 @@ use std::process::ExitStatus;
 
 pub use crate::error::{PrivescError, Result};
 
+#[cfg(target_os = "macos")]
+use privesc_darwin::PrivilegedChildInner;
+#[cfg(target_os = "linux")]
+use privesc_linux::PrivilegedChildInner;
+#[cfg(windows)]
+use privesc_windows::PrivilegedChildInner;
+
+/// Handle to a spawned privileged process.
+///
+/// This struct wraps the underlying platform-specific process handle and provides
+/// methods to wait for completion and retrieve the output.
+///
+/// # Platform Behavior
+/// - **macOS/Linux**: Wraps a `std::process::Child`.
+/// - **Windows**: Wraps a Windows process `HANDLE`.
+pub struct PrivilegedChild {
+    inner: PrivilegedChildInner,
+}
+
+impl PrivilegedChild {
+    /// Waits for the process to exit and returns the output.
+    ///
+    /// This method consumes the `PrivilegedChild` and blocks until the process
+    /// has finished executing.
+    ///
+    /// # Note
+    /// On Windows, stdout and stderr are always `None` as `ShellExecuteExW`
+    /// does not support output redirection.
+    pub fn wait(self) -> Result<PrivilegedOutput> {
+        self.inner.wait()
+    }
+
+    /// Attempts to collect the exit status of the child if it has already exited.
+    ///
+    /// This method will not block. Returns `Ok(None)` if the process has not
+    /// yet exited.
+    ///
+    /// Note: Unlike [`wait`](Self::wait), this method cannot return stdout/stderr
+    /// because the process may still be running. To get output, use [`wait`](Self::wait).
+    pub fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
+        self.inner.try_wait()
+    }
+
+    /// Returns the OS-assigned process identifier of the child process, if available.
+    ///
+    /// # Platform Behavior
+    /// - **macOS/Linux**: Returns `Some(pid)`.
+    /// - **Windows**: Returns `None` (ShellExecuteExW doesn't provide the process ID).
+    pub fn id(&self) -> Option<u32> {
+        self.inner.id()
+    }
+}
+
 /// Output from a privileged command execution.
 ///
 /// Unlike `std::process::Output`, this struct uses `Option` for stdout/stderr
@@ -140,15 +193,53 @@ impl PrivilegedCommand {
 
         #[cfg(target_os = "macos")]
         {
-            privesc_darwin::privesc(&self.program, &args, self.gui, prompt)
+            privesc_darwin::run(&self.program, &args, self.gui, prompt)
         }
         #[cfg(windows)]
         {
-            privesc_windows::privesc(&self.program, &args, self.gui, prompt)
+            privesc_windows::run(&self.program, &args, self.gui, prompt)
         }
         #[cfg(target_os = "linux")]
         {
-            privesc_linux::privesc(&self.program, &args, self.gui, prompt)
+            privesc_linux::run(&self.program, &args, self.gui, prompt)
         }
+    }
+
+    /// Spawns the command with elevated privileges, returning a handle to the process.
+    ///
+    /// Unlike [`run`](Self::run), this method returns immediately after spawning,
+    /// allowing you to perform other work while the privileged process runs.
+    ///
+    /// # Returns
+    /// A `PrivilegedChild` handle that can be used to wait for the process to finish.
+    ///
+    /// # Platform Behavior
+    /// - **macOS/Linux**: Returns a handle wrapping the underlying process.
+    /// - **Windows**: Returns a handle wrapping the Windows process `HANDLE`.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use privesc::PrivilegedCommand;
+    ///
+    /// let child = PrivilegedCommand::new("/usr/bin/long-running-task")
+    ///     .spawn()?;
+    ///
+    /// // Do other work...
+    ///
+    /// let output = child.wait()?;
+    /// # Ok::<(), privesc::PrivescError>(())
+    /// ```
+    pub fn spawn(&self) -> Result<PrivilegedChild> {
+        let args: Vec<&str> = self.args.iter().map(String::as_str).collect();
+        let prompt = self.prompt.as_deref();
+
+        #[cfg(target_os = "macos")]
+        let inner = privesc_darwin::spawn(&self.program, &args, self.gui, prompt)?;
+        #[cfg(windows)]
+        let inner = privesc_windows::spawn(&self.program, &args, self.gui, prompt)?;
+        #[cfg(target_os = "linux")]
+        let inner = privesc_linux::spawn(&self.program, &args, self.gui, prompt)?;
+
+        Ok(PrivilegedChild { inner })
     }
 }
