@@ -93,6 +93,11 @@ pub struct PrivilegedChildInner {
     handle: HANDLE,
 }
 
+// SAFETY: Windows process handles are valid to use from any thread.
+// All mutable access is protected by &mut self, preventing data races.
+unsafe impl Send for PrivilegedChildInner {}
+unsafe impl Sync for PrivilegedChildInner {}
+
 impl PrivilegedChildInner {
     /// Waits for the process to exit and returns the output.
     ///
