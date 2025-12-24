@@ -1,9 +1,9 @@
 [package]
 name = "privesc"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 authors = ["Jakub Kubík <jakub.kubik.it@protonmail.com>"]
-description = "Small utility library for multi-platform privelege escalation"
+description = "Small utility library for multi-platform privilege escalation"
 license = "MIT"
 repository = "https://github.com/quincy-rs/privesc"
 readme = "README.md"
