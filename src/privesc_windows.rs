@@ -3,7 +3,7 @@ use std::process::ExitStatus;
 
 use windows::{
     Win32::{
-        Foundation::{CloseHandle, WAIT_OBJECT_0},
+        Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT},
         System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject},
         UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW},
     },
@@ -80,19 +80,121 @@ fn escape_arguments(args: &[&str]) -> String {
         .join(" ")
 }
 
-/// Execute a program with elevated privileges using `ShellExecuteExW` with the "runas" verb.
+/// Platform-specific handle to a spawned privileged process.
+///
+/// This struct wraps the Windows process handle and provides methods to wait for
+/// completion and retrieve the exit status.
+///
+/// # Note
+/// On Windows, stdout and stderr capture is not available when using UAC elevation
+/// via `ShellExecuteExW`. The [`wait`](Self::wait) method will always return `None`
+/// for stdout and stderr.
+pub struct PrivilegedChildInner {
+    handle: HANDLE,
+}
+
+impl PrivilegedChildInner {
+    /// Waits for the process to exit and returns the output.
+    ///
+    /// This method consumes the handle and blocks until the process
+    /// has finished executing.
+    ///
+    /// # Note
+    /// On Windows, stdout and stderr are always `None` as `ShellExecuteExW`
+    /// does not support output redirection.
+    pub fn wait(self) -> Result<PrivilegedOutput> {
+        // SAFETY: handle is valid as it was obtained from ShellExecuteExW.
+        let wait_result = unsafe { WaitForSingleObject(self.handle, INFINITE) };
+
+        if wait_result != WAIT_OBJECT_0 {
+            // Don't close handle here - Drop will handle it
+            return Err(PrivescError::PrivilegeEscalationFailed(
+                "Failed to wait for process".to_string(),
+            ));
+        }
+
+        let mut exit_code: u32 = 0;
+        // SAFETY: handle is valid and exit_code is a valid pointer.
+        let exit_code_result = unsafe { GetExitCodeProcess(self.handle, &mut exit_code) };
+
+        if let Err(e) = exit_code_result {
+            return Err(PrivescError::PrivilegeEscalationFailed(format!(
+                "Failed to get exit code: {}",
+                e
+            )));
+        }
+
+        Ok(PrivilegedOutput {
+            status: ExitStatus::from_raw(exit_code),
+            stdout: None,
+            stderr: None,
+        })
+    }
+
+    /// Attempts to collect the exit status of the child if it has already exited.
+    ///
+    /// This method will not block. Returns `Ok(None)` if the process has not
+    /// yet exited.
+    ///
+    /// # Note
+    /// On Windows, this only returns the exit status, not the full output.
+    pub fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
+        // SAFETY: handle is valid.
+        let wait_result = unsafe { WaitForSingleObject(self.handle, 0) };
+
+        if wait_result == WAIT_TIMEOUT {
+            return Ok(None);
+        }
+
+        if wait_result != WAIT_OBJECT_0 {
+            return Err(PrivescError::PrivilegeEscalationFailed(
+                "Failed to check process status".to_string(),
+            ));
+        }
+
+        let mut exit_code: u32 = 0;
+        // SAFETY: handle is valid and exit_code is a valid pointer.
+        let exit_code_result = unsafe { GetExitCodeProcess(self.handle, &mut exit_code) };
+
+        if let Err(e) = exit_code_result {
+            return Err(PrivescError::PrivilegeEscalationFailed(format!(
+                "Failed to get exit code: {}",
+                e
+            )));
+        }
+
+        Ok(Some(ExitStatus::from_raw(exit_code)))
+    }
+
+    /// Returns the OS-assigned process identifier of the child process, if available.
+    ///
+    /// On Windows, this always returns `None` as `ShellExecuteExW` does not provide
+    /// the process ID directly.
+    pub fn id(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl Drop for PrivilegedChildInner {
+    fn drop(&mut self) {
+        // SAFETY: handle is valid.
+        let _ = unsafe { CloseHandle(self.handle) };
+    }
+}
+
+/// Spawn a program with elevated privileges using `ShellExecuteExW` with the "runas" verb.
 ///
 /// # Args:
 /// - `program` - The path to the program to execute.
 /// - `args` - The arguments to pass to the program.
 ///
 /// # Returns:
-/// - `Result<PrivilegedOutput>` - The output of the program.
+/// - `Result<PrivilegedChildInner>` - A handle to the spawned process.
 ///
 /// # Note:
 /// This function uses `ShellExecuteExW` with the "runas" verb to trigger UAC elevation.
-/// stdout and stderr are `None` as `ShellExecuteExW` does not support output redirection.
-fn privesc_gui(program: &str, args: &[&str]) -> Result<PrivilegedOutput> {
+/// stdout and stderr capture is not available.
+fn spawn_gui(program: &str, args: &[&str]) -> Result<PrivilegedChildInner> {
     let verb = HSTRING::from("runas");
     let file = HSTRING::from(program);
     let parameters = HSTRING::from(escape_arguments(args));
@@ -126,37 +228,29 @@ fn privesc_gui(program: &str, args: &[&str]) -> Result<PrivilegedOutput> {
         ));
     }
 
-    // Wait for the process to finish and get exit code
-    // SAFETY: handle is valid as we checked above.
-    let wait_result = unsafe { WaitForSingleObject(handle, INFINITE) };
+    Ok(PrivilegedChildInner { handle })
+}
 
-    if wait_result != WAIT_OBJECT_0 {
-        // SAFETY: handle is valid.
-        let _ = unsafe { CloseHandle(handle) };
-        return Err(PrivescError::PrivilegeEscalationFailed(
-            "Failed to wait for process".to_string(),
-        ));
-    }
-
-    let mut exit_code: u32 = 0;
-    // SAFETY: handle is valid and exit_code is a valid pointer.
-    let exit_code_result = unsafe { GetExitCodeProcess(handle, &mut exit_code) };
-
-    // SAFETY: handle is valid.
-    let _ = unsafe { CloseHandle(handle) };
-
-    if let Err(e) = exit_code_result {
-        return Err(PrivescError::PrivilegeEscalationFailed(format!(
-            "Failed to get exit code: {}",
-            e
-        )));
-    }
-
-    Ok(PrivilegedOutput {
-        status: ExitStatus::from_raw(exit_code),
-        stdout: None,
-        stderr: None,
-    })
+/// Spawn a program with elevated privileges using `ShellExecuteExW`.
+///
+/// # Args:
+/// - `program` - The path to the program to execute.
+/// - `args` - The arguments to pass to the program.
+/// - `gui` - Ignored on Windows, as only GUI elevation via UAC is supported.
+/// - `prompt` - Ignored on Windows, as UAC displays its own prompt.
+///
+/// # Returns:
+/// - `Result<PrivilegedChildInner>` - A handle to the spawned process.
+///
+/// # Note:
+/// stdout and stderr capture is not available on Windows with UAC elevation.
+pub fn spawn(
+    program: &str,
+    args: &[&str],
+    _gui: bool,
+    _prompt: Option<&str>,
+) -> Result<PrivilegedChildInner> {
+    spawn_gui(program, args)
 }
 
 /// Execute a program with elevated privileges using `ShellExecuteExW`.
@@ -172,11 +266,11 @@ fn privesc_gui(program: &str, args: &[&str]) -> Result<PrivilegedOutput> {
 ///
 /// # Note:
 /// stdout and stderr are `None` as `ShellExecuteExW` does not support output redirection.
-pub fn privesc(
+pub fn run(
     program: &str,
     args: &[&str],
-    _gui: bool,
-    _prompt: Option<&str>,
+    gui: bool,
+    prompt: Option<&str>,
 ) -> Result<PrivilegedOutput> {
-    privesc_gui(program, args)
+    spawn(program, args, gui, prompt)?.wait()
 }
