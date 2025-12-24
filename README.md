@@ -1,4 +1,9 @@
 # privesc
+[![Crates.io](https://img.shields.io/crates/v/privesc.svg)](https://crates.io/crates/privesc)
+[![Documentation](https://docs.rs/privesc/badge.svg)](https://docs.rs/privesc/)
+[![Build status](https://github.com/quincy-rs/privesc/workflows/CI/badge.svg)](https://github.com/quincy-rs/privesc/actions?query=workflow%3ACI)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENCE)
+[![Matrix](https://img.shields.io/badge/chat-%23quincy:matrix.org-%2346BC99?logo=matrix)](https://matrix.to/#/#quincy:matrix.org)
 
 Cross-platform privilege escalation for Rust. 
 
