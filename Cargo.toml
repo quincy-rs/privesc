@@ -1,6 +1,6 @@
 [package]
 name = "privesc"
-version = "1.1.1"
+version = "1.1.2"
 edition = "2024"
 authors = ["Jakub Kubík <jakub.kubik.it@protonmail.com>"]
 description = "Small utility library for multi-platform privilege escalation"
