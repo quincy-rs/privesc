@@ -4,7 +4,10 @@ use privesc::PrivilegedCommand;
 
 fn main() {
     // Spawn a privileged process without blocking
-    let mut child = PrivilegedCommand::new("sleep").arg("2").spawn().unwrap();
+    let mut child = PrivilegedCommand::new("/bin/sleep")
+        .arg("2")
+        .spawn()
+        .unwrap();
 
     if let Some(id) = child.id() {
         println!("Spawned process with ID: {id}");

@@ -11,6 +11,10 @@ Run commands with elevated privileges on macOS, Linux, and Windows.
 
 ## Usage
 
+**There is explicit validation for the `program` parameter to ensure that it is an absolute path to an executable file.**
+
+This is done in order to ensure that the target executable has not been tampered with or is not a symlink to a malicious binary (PATH hijacking etc.)
+
 ```rust
 use privesc::PrivilegedCommand;
 
@@ -81,24 +85,24 @@ fn main() -> privesc::Result<()> {
 
 ### macOS
 
-GUI mode spawns an AppleScript authentication dialog via `osascript`. CLI mode uses `sudo` with optional custom prompt.
+**CLI mode (`sudo`)**: Arguments are passed directly via Rust's `Command::args()`, which uses `execve` under the hood. No shell is involved — arguments are passed as-is to the target program regardless of special characters.
+
+**GUI mode (`osascript`)**: Arguments flow through two stages:
+1. Rust → osascript: Uses `Command::args()` (no shell, safe)
+2. AppleScript → target: Uses `quoted form of` to escape each argument before passing to `do shell script`
+
+AppleScript's `quoted form of` wraps arguments in single quotes and escapes embedded single quotes as `'\''`. This prevents shell interpretation of `$`, backticks, spaces, and other metacharacters.
 
 ### Linux
 
-GUI mode requires `pkexec` (PolicyKit). Falls back to error if unavailable. CLI mode uses `sudo`. Custom prompts only work in CLI mode due to pkexec limitations.
+**CLI mode (`sudo`)**: Arguments are passed directly via Rust's `Command::args()`, which uses `execve` under the hood. No shell is involved — arguments are passed as-is to the target program regardless of special characters.
+
+**GUI mode (`pkexec`)**: Same as CLI mode (`sudo`)
 
 ### Windows
 
-Always shows UAC dialog regardless of `gui` parameter. Custom prompts are ignored (UAC controls the dialog). **stdout/stderr are not captured** — `PrivilegedOutput.stdout` and `.stderr` will be `None`.
+**CLI mode (UAC via `ShellExecuteExW`)**: The Windows API takes arguments as a single string, not an array. This library implements custom escaping following Windows command-line parsing conventions:
+- **Regular executables**: Arguments are escaped per `CommandLineToArgvW` rules (quotes, backslashes)
+- **Batch files (`.bat`/`.cmd`)**: Additional escaping prevents `%VAR%` environment variable expansion and related injection vectors (addresses CVE-2024-24576 class vulnerabilities)
 
-## Security Considerations
-
-This library executes commands with root/administrator privileges. Misuse can compromise system security.
-
-**Input validation is your responsibility.** This library does not sanitize inputs. Before calling `Command::run()`:
-
-- Validate `program` is an expected absolute path
-- Validate all `args` against an allowlist if derived from user input
-- Never pass unsanitized user input to `prompt`
-
-**sudo prompt format strings**: The `prompt` parameter on Unix is passed to `sudo -p`, which interprets `%u`, `%h`, etc. Avoid user-controlled prompt strings or escape `%` characters.
+**GUI mode (`runas`)**: Same as CLI mode (`ShellExecuteExW`)

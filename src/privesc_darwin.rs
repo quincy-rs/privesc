@@ -1,5 +1,6 @@
 use std::{
     io::Write,
+    path::Path,
     process::{Child, Command, ExitStatus, Stdio},
 };
 
@@ -63,12 +64,13 @@ impl PrivilegedChildInner {
 ///
 /// # Returns:
 /// - `Result<PrivilegedChildInner>` - A handle to the spawned process.
-fn spawn_gui(program: &str, args: &[&str], prompt: Option<&str>) -> Result<PrivilegedChildInner> {
+fn spawn_gui(program: &Path, args: &[&str], prompt: Option<&str>) -> Result<PrivilegedChildInner> {
     let mut process = Command::new("osascript")
         .arg("-")
         .arg(program)
         .arg(prompt.unwrap_or(&format!(
-            "Administrator privileges required to launch {program}",
+            "Administrator privileges required to launch {}",
+            program.display()
         )))
         .args(args)
         .stdin(Stdio::piped())
@@ -94,7 +96,7 @@ fn spawn_gui(program: &str, args: &[&str], prompt: Option<&str>) -> Result<Privi
 ///
 /// # Returns:
 /// - `Result<PrivilegedChildInner>` - A handle to the spawned process.
-fn spawn_cli(program: &str, args: &[&str], prompt: Option<&str>) -> Result<PrivilegedChildInner> {
+fn spawn_cli(program: &Path, args: &[&str], prompt: Option<&str>) -> Result<PrivilegedChildInner> {
     let mut command = Command::new("sudo");
 
     if let Some(prompt) = prompt {
@@ -124,7 +126,7 @@ fn spawn_cli(program: &str, args: &[&str], prompt: Option<&str>) -> Result<Privi
 /// # Returns:
 /// - `Result<PrivilegedChildInner>` - A handle to the spawned process.
 pub fn spawn(
-    program: &str,
+    program: &Path,
     args: &[&str],
     gui: bool,
     prompt: Option<&str>,
@@ -147,7 +149,7 @@ pub fn spawn(
 /// # Returns:
 /// - `Result<PrivilegedOutput>` - The output of the program.
 pub fn run(
-    program: &str,
+    program: &Path,
     args: &[&str],
     gui: bool,
     prompt: Option<&str>,
