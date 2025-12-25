@@ -1,7 +1,7 @@
 use privesc::PrivilegedCommand;
 
 fn main() {
-    let output = PrivilegedCommand::new("cat")
+    let output = PrivilegedCommand::new("/bin/cat")
         .arg("/etc/shadow")
         .gui(true)
         .prompt("Administrator privileges required to read the test file")

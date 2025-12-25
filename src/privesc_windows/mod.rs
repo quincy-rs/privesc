@@ -1,4 +1,13 @@
+//! Windows privilege escalation implementation.
+//!
+//! This module provides functionality to spawn and run processes with elevated
+//! privileges on Windows using `ShellExecuteExW` with the "runas" verb to trigger
+//! UAC elevation.
+
+mod args;
+
 use std::os::windows::process::ExitStatusExt;
+use std::path::Path;
 use std::process::ExitStatus;
 
 use windows::{
@@ -13,72 +22,7 @@ use windows::{
 use crate::PrivilegedOutput;
 use crate::error::{PrivescError, Result};
 
-/// Escapes a single argument for Windows command-line parsing.
-///
-/// Follows the escaping rules for `CommandLineToArgvW`:
-/// - Arguments containing spaces, tabs, or quotes are wrapped in double quotes
-/// - Backslashes are literal unless followed by a double quote
-/// - Backslashes preceding a double quote must be doubled
-/// - Double quotes within the argument are escaped as `\"`
-fn escape_argument(arg: &str) -> String {
-    // Check if quoting is needed
-    let needs_quoting = arg.is_empty()
-        || arg.contains(' ')
-        || arg.contains('\t')
-        || arg.contains('"')
-        || arg.contains('\\');
-
-    if !needs_quoting {
-        return arg.to_string();
-    }
-
-    let mut result = String::with_capacity(arg.len() + 2);
-    result.push('"');
-
-    let mut backslash_count = 0;
-
-    for c in arg.chars() {
-        match c {
-            '\\' => {
-                backslash_count += 1;
-            }
-            '"' => {
-                // Double all backslashes before a quote, then add escaped quote
-                for _ in 0..backslash_count {
-                    result.push('\\');
-                }
-                backslash_count = 0;
-                result.push('\\');
-                result.push('"');
-            }
-            _ => {
-                // Flush backslashes as-is (they're literal when not before a quote)
-                for _ in 0..backslash_count {
-                    result.push('\\');
-                }
-                backslash_count = 0;
-                result.push(c);
-            }
-        }
-    }
-
-    // Double any trailing backslashes (they precede the closing quote)
-    for _ in 0..backslash_count {
-        result.push('\\');
-        result.push('\\');
-    }
-
-    result.push('"');
-    result
-}
-
-/// Escapes and joins arguments into a single command-line string.
-fn escape_arguments(args: &[&str]) -> String {
-    args.iter()
-        .map(|arg| escape_argument(arg))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
+use args::{escape_arguments, escape_bat_arguments};
 
 /// Platform-specific handle to a spawned privileged process.
 ///
@@ -187,6 +131,13 @@ impl Drop for PrivilegedChildInner {
     }
 }
 
+/// Returns true if the given path has a batch file extension (.bat or .cmd).
+fn is_batch_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("bat") || ext.eq_ignore_ascii_case("cmd"))
+}
+
 /// Spawn a program with elevated privileges using `ShellExecuteExW` with the "runas" verb.
 ///
 /// # Args:
@@ -199,10 +150,19 @@ impl Drop for PrivilegedChildInner {
 /// # Note:
 /// This function uses `ShellExecuteExW` with the "runas" verb to trigger UAC elevation.
 /// stdout and stderr capture is not available.
-fn spawn_gui(program: &str, args: &[&str]) -> Result<PrivilegedChildInner> {
+///
+/// Batch files (.bat, .cmd) are handled with special escaping rules to prevent
+/// command injection via environment variable expansion.
+fn spawn_gui(program: &Path, args: &[&str]) -> Result<PrivilegedChildInner> {
     let verb = HSTRING::from("runas");
     let file = HSTRING::from(program);
-    let parameters = HSTRING::from(escape_arguments(args));
+
+    // Use batch-specific escaping for .bat/.cmd files
+    let parameters = if is_batch_file(program) {
+        HSTRING::from(escape_bat_arguments(args))
+    } else {
+        HSTRING::from(escape_arguments(args))
+    };
 
     let mut info = SHELLEXECUTEINFOW {
         cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
@@ -250,7 +210,7 @@ fn spawn_gui(program: &str, args: &[&str]) -> Result<PrivilegedChildInner> {
 /// # Note:
 /// stdout and stderr capture is not available on Windows with UAC elevation.
 pub fn spawn(
-    program: &str,
+    program: &Path,
     args: &[&str],
     _gui: bool,
     _prompt: Option<&str>,
@@ -272,10 +232,42 @@ pub fn spawn(
 /// # Note:
 /// stdout and stderr are `None` as `ShellExecuteExW` does not support output redirection.
 pub fn run(
-    program: &str,
+    program: &Path,
     args: &[&str],
     gui: bool,
     prompt: Option<&str>,
 ) -> Result<PrivilegedOutput> {
     spawn(program, args, gui, prompt)?.wait()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_batch_file() {
+        // Batch files should be detected
+        assert!(is_batch_file(Path::new("script.bat")));
+        assert!(is_batch_file(Path::new("script.cmd")));
+        assert!(is_batch_file(Path::new(r"C:\Windows\script.bat")));
+        assert!(is_batch_file(Path::new(r"C:\Windows\script.cmd")));
+
+        // Case-insensitive detection
+        assert!(is_batch_file(Path::new("script.BAT")));
+        assert!(is_batch_file(Path::new("script.CMD")));
+        assert!(is_batch_file(Path::new("script.Bat")));
+        assert!(is_batch_file(Path::new("script.Cmd")));
+
+        // Non-batch files should not be detected
+        assert!(!is_batch_file(Path::new("program.exe")));
+        assert!(!is_batch_file(Path::new("script.ps1")));
+        assert!(!is_batch_file(Path::new("script.sh")));
+        assert!(!is_batch_file(Path::new(r"C:\Windows\System32\cmd.exe")));
+        assert!(!is_batch_file(Path::new("nobatch")));
+        assert!(!is_batch_file(Path::new("")));
+
+        // Edge cases: .bat/.cmd in the filename but not as extension
+        assert!(!is_batch_file(Path::new("batch.bat.exe")));
+        assert!(!is_batch_file(Path::new("cmd.cmd.txt")));
+    }
 }

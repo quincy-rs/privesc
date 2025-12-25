@@ -6,8 +6,26 @@ on:
   pull_request:
 
 jobs:
+  test:
+    name: Test crate
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout repository
+      - uses: dtolnay/rust-toolchain@stable
+        name: Set up toolchain
+      - uses: Swatinem/rust-cache@v2
+        name: Cache toolchain and dependencies
+      - run: cargo test
+        name: Run tests
+
   lint:
-    name: Check code style (${{ matrix.os }})
+    name: Check code style
 
     strategy:
       matrix:
@@ -24,13 +42,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         name: Cache toolchain and dependencies
-      - uses: actions-rs/cargo@v1
+      - run: cargo fmt --all -- --check
         name: Check code with cargo fmt
-        with:
-          command: fmt
-          args: --all -- --check
-      - uses: actions-rs/cargo@v1
+      - run: cargo clippy --all-targets -- -D warnings
         name: Check code with cargo clippy
-        with:
-          command: clippy
-          args: --all-targets -- -D warnings

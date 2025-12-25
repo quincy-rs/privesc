@@ -1,5 +1,6 @@
 use crate::PrivilegedOutput;
 use crate::error::{PrivescError, Result};
+use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 
 /// Platform-specific handle to a spawned privileged process.
@@ -46,14 +47,11 @@ impl PrivilegedChildInner {
 ///
 /// # Returns:
 /// - `Result<PrivilegedChildInner>` - A handle to the spawned process.
-fn spawn_gui(program: &str, args: &[&str]) -> Result<PrivilegedChildInner> {
-    if which::which("pkexec").is_err() {
-        return Err(PrivescError::PrivilegeEscalationToolNotFound(
-            "pkexec".to_string(),
-        ));
-    }
+fn spawn_gui(program: &Path, args: &[&str]) -> Result<PrivilegedChildInner> {
+    let pkexec_path = which::which("pkexec")
+        .map_err(|_| PrivescError::PrivilegeEscalationToolNotFound("pkexec".to_string()))?;
 
-    let process = Command::new("pkexec")
+    let process = Command::new(pkexec_path)
         .arg(program)
         .args(args)
         .stdin(Stdio::piped())
@@ -73,7 +71,7 @@ fn spawn_gui(program: &str, args: &[&str]) -> Result<PrivilegedChildInner> {
 ///
 /// # Returns:
 /// - `Result<PrivilegedChildInner>` - A handle to the spawned process.
-fn spawn_cli(program: &str, args: &[&str], prompt: Option<&str>) -> Result<PrivilegedChildInner> {
+fn spawn_cli(program: &Path, args: &[&str], prompt: Option<&str>) -> Result<PrivilegedChildInner> {
     let mut command = Command::new("sudo");
 
     if let Some(prompt) = prompt {
@@ -103,7 +101,7 @@ fn spawn_cli(program: &str, args: &[&str], prompt: Option<&str>) -> Result<Privi
 /// # Returns:
 /// - `Result<PrivilegedChildInner>` - A handle to the spawned process.
 pub fn spawn(
-    program: &str,
+    program: &Path,
     args: &[&str],
     gui: bool,
     prompt: Option<&str>,
@@ -126,7 +124,7 @@ pub fn spawn(
 /// # Returns:
 /// - `Result<PrivilegedOutput>` - The output of the program.
 pub fn run(
-    program: &str,
+    program: &Path,
     args: &[&str],
     gui: bool,
     prompt: Option<&str>,

@@ -7,7 +7,7 @@ mod privesc_linux;
 #[cfg(windows)]
 mod privesc_windows;
 
-use std::process::ExitStatus;
+use std::{path::PathBuf, process::ExitStatus};
 
 pub use crate::error::{PrivescError, Result};
 
@@ -111,9 +111,9 @@ impl PrivilegedOutput {
 /// # Example
 ///
 /// ```no_run
-/// use privesc::Command;
+/// use privesc::PrivilegedCommand;
 ///
-/// let output = Command::new("/usr/bin/cat")
+/// let output = PrivilegedCommand::new("/usr/bin/cat")
 ///     .arg("/etc/shadow")
 ///     .run()?;
 /// # Ok::<(), privesc::PrivescError>(())
@@ -126,7 +126,7 @@ impl PrivilegedOutput {
 ///   is not available.
 #[derive(Debug, Clone)]
 pub struct PrivilegedCommand {
-    program: String,
+    program: PathBuf,
     args: Vec<String>,
     gui: bool,
     prompt: Option<String>,
@@ -137,7 +137,7 @@ impl PrivilegedCommand {
     ///
     /// # Arguments
     /// * `program` - The path to the program to execute with elevated privileges.
-    pub fn new(program: impl Into<String>) -> Self {
+    pub fn new(program: impl Into<PathBuf>) -> Self {
         Self {
             program: program.into(),
             args: Vec::new(),
@@ -188,6 +188,10 @@ impl PrivilegedCommand {
     /// A `PrivilegedOutput` containing the exit status and optionally captured
     /// stdout/stderr. Note that stdout/stderr are `None` on Windows.
     pub fn run(&self) -> Result<PrivilegedOutput> {
+        if !self.program.is_absolute() {
+            return Err(PrivescError::InvalidProgramPath(self.program.clone()));
+        }
+
         let args: Vec<&str> = self.args.iter().map(String::as_str).collect();
         let prompt = self.prompt.as_deref();
 
@@ -230,6 +234,10 @@ impl PrivilegedCommand {
     /// # Ok::<(), privesc::PrivescError>(())
     /// ```
     pub fn spawn(&self) -> Result<PrivilegedChild> {
+        if !self.program.is_absolute() {
+            return Err(PrivescError::InvalidProgramPath(self.program.clone()));
+        }
+
         let args: Vec<&str> = self.args.iter().map(String::as_str).collect();
         let prompt = self.prompt.as_deref();
 
