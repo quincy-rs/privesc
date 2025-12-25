@@ -78,7 +78,7 @@ fn spawn_gui(program: &str, args: &[&str], prompt: Option<&str>) -> Result<Privi
 
     process
         .stdin
-        .as_mut()
+        .take()
         .expect("stdin piped")
         .write_all(ESCALLATION_SCRIPT.as_bytes())?;
 
